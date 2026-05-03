@@ -1,0 +1,375 @@
+================================================================================
+CI TEST RUN REPORT
+================================================================================
+
+NOTE: This is a synthetic CI log for workshop training purposes.
+      Source files referenced below (e.g. timeout_handler.py, diagnostics.py,
+      unlock_flow.py) are part of a fictional MCM codebase and are NOT included
+      in this repository. This is intentional — treat them as external context
+      during failure analysis.
+
+================================================================================
+
+Pipeline:       main-ci / virtual-entry-unlock-tests
+Run ID:         #1247
+Branch:         feature/unlock-timeout-refactor
+Commit:         a3f8c21 "refactor: update unlock-flow timeout handling"
+Triggered by:   push
+Timestamp:      2026-04-28T14:32:07Z
+Environment:    CI pipeline (virtual topology)
+Runner:         ci-runner-04.internal
+Build status:   SUCCESS (build completed in 8.2s)
+Test status:    FAILURE (4 test failures detected)
+
+================================================================================
+BUILD LOG (abbreviated)
+================================================================================
+
+  [14:32:08]  Checking out branch feature/unlock-timeout-refactor...
+  [14:32:09]  Commit: a3f8c21 — refactor: update unlock-flow timeout handling
+  [14:32:09]  Author: dev-engineer-3
+  [14:32:09]  Changed files:
+                src/mcm/timeout_handler.py  (+47, -31)
+                src/mcm/unlock_flow.py      (+12, -8)
+                src/mcm/diagnostics.py      (+3, -6)
+                tests/conftest.py           (+2, -1)
+  [14:32:10]  Installing dependencies...
+  [14:32:12]  Dependencies installed (pytest 8.1.1, coverage 7.4.0)
+  [14:32:13]  Starting virtual topology...
+  [14:32:14]  Virtual topology ready (4 mocked nodes online)
+  [14:32:14]     ✓ Credential Reader    — online
+  [14:32:14]     ✓ Lock Unit            — online
+  [14:32:14]     ✓ Door Sensor          — online
+  [14:32:14]     ✓ Gateway              — online
+  [14:32:14]  Starting test execution...
+
+================================================================================
+SUMMARY
+================================================================================
+
+  Suite:          virtual_entry_unlock_tests
+  Total tests:    18
+  Passed:         14
+  Failed:         4
+  Skipped:        0
+  Duration:       12.4s
+
+  Recent change:  unlock-flow timeout handling was refactored in commit a3f8c21.
+                  The commit modified timeout_handler.py, unlock_flow.py and
+                  diagnostics.py. The stated goal was to "centralize timeout
+                  configuration and simplify timer lifecycle management."
+
+================================================================================
+PASSED TESTS (14)
+================================================================================
+
+  [PASS]  TC-UNLOCK-001  valid credential unlock (nominal)              0.23s
+  [PASS]  TC-UNLOCK-002  invalid credential rejected                    0.11s
+  [PASS]  TC-UNLOCK-005  gateway available unlock                       0.19s
+  [PASS]  TC-UNLOCK-007  repeated unlock request rejected               0.14s
+  [PASS]  TC-UNLOCK-009  valid credential after previous invalid        0.22s
+  [PASS]  TC-UNLOCK-010  lock unit acknowledges within timeout          0.18s
+  [PASS]  TC-UNLOCK-011  door sensor reports opened within timeout      0.21s
+  [PASS]  TC-UNLOCK-012  diagnostic response within threshold           0.15s
+  [PASS]  TC-UNLOCK-013  message sequence nominal order                 0.17s
+  [PASS]  TC-UNLOCK-014  system remains locked after invalid credential 0.12s
+  [PASS]  TC-UNLOCK-015  audit event on invalid credential              0.13s
+  [PASS]  TC-UNLOCK-016  gateway routes message correctly               0.16s
+  [PASS]  TC-UNLOCK-017  no duplicate unlock command on repeated event  0.14s
+  [PASS]  TC-UNLOCK-018  system locked state after gateway failure      0.20s
+
+================================================================================
+FAILED TESTS (4)
+================================================================================
+
+--- FAIL: TC-UNLOCK-003 — delayed door sensor response -----------------------
+
+  Scenario:     Valid credential presented, door sensor responds late.
+  Requirement:  REQ-004 (door_opened expected within 500 ms)
+
+  Expected:     door_opened event received within 500 ms
+  Actual:       door_opened event received after 820 ms
+
+  Assertion:    assert response_time <= 500
+                AssertionError: 820 > 500
+
+  Timeline:
+    T+0 ms      credential_event_valid sent by Credential Reader
+    T+38 ms     unlock_request_received_by_mcm
+    T+42 ms     unlock_command_sent_to_lock_unit
+    T+155 ms    lock_acknowledgement received
+    T+820 ms    door_opened_event received           ← LATE (threshold: 500 ms)
+
+  Fixture state at failure:
+    virtual_topology:  running
+    reader:            available, last_credential=valid
+    lock_unit:         unlocked, acknowledged=True
+    door_sensor:       available, door_opened=True (late)
+    gateway:           available
+
+  Notes:        The door sensor did eventually report door_opened,
+                but exceeded the configured timeout threshold by 320 ms.
+                This test was passing consistently before the timeout refactor.
+                In the last 10 CI runs before this commit, the observed response
+                time was between 180 ms and 340 ms (well within the 500 ms limit).
+
+  Stderr:
+    [WARN]  MCM: door_sensor response time 820 ms exceeds threshold 500 ms
+    [WARN]  MCM: entering degraded state — door sensor slow
+    [INFO]  MCM: unlock sequence completed with warning
+
+--- FAIL: TC-UNLOCK-004 — lock unit timeout -----------------------------------
+
+  Scenario:     Lock unit does not respond within configured timeout.
+  Requirement:  REQ-003 (LOCK_UNIT_TIMEOUT diagnostic expected)
+
+  Expected:     LOCK_UNIT_TIMEOUT diagnostic event raised
+  Actual:       No diagnostic event observed
+
+  Assertion:    assert "LOCK_UNIT_TIMEOUT" in diagnostic_events
+                AssertionError: 'LOCK_UNIT_TIMEOUT' not found in []
+
+  Timeline:
+    T+0 ms      credential_event_valid sent by Credential Reader
+    T+35 ms     unlock_request_received_by_mcm
+    T+40 ms     unlock_command_sent_to_lock_unit
+    T+340 ms    [timeout threshold reached — no lock_acknowledgement]
+    ...         (waiting)
+    T+2000 ms   test timeout — no diagnostic event observed
+
+  Fixture state at failure:
+    virtual_topology:  running
+    reader:            available, last_credential=valid
+    lock_unit:         locked, acknowledged=False, received_unlock=True
+    door_sensor:       available, door_opened=False
+    gateway:           available
+
+  Diagnostic events captured:  []    ← EMPTY — expected at least one event
+
+  Notes:        The lock unit deliberately did not acknowledge the unlock command.
+                The MCM was expected to detect the timeout (300 ms threshold)
+                and raise a LOCK_UNIT_TIMEOUT diagnostic event.
+                No diagnostic event was observed at all — the diagnostic_events
+                list is completely empty.
+                Possible regression: the refactored timeout_handler.py may have
+                changed or removed the code path that emits this diagnostic.
+                
+                In previous CI runs, this test consistently passed with the
+                diagnostic event appearing at approximately T+310-330 ms.
+
+  Stderr:
+    [INFO]  MCM: unlock_command sent to Lock Unit
+    [DEBUG] MCM: waiting for lock_acknowledgement...
+    [DEBUG] MCM: timeout_handler tick at T+100 ms — no ack
+    [DEBUG] MCM: timeout_handler tick at T+200 ms — no ack
+    [DEBUG] MCM: timeout_handler tick at T+300 ms — no ack
+    [DEBUG] MCM: timeout_handler tick at T+340 ms — threshold reached
+    (no further output — expected diagnostic emission here)
+
+--- FAIL: TC-UNLOCK-006 — diagnostic response delay ---------------------------
+
+  Scenario:     Diagnostic request sent to MCM, response arrives late.
+  Requirement:  REQ-006 (diagnostic response within 1000 ms)
+
+  Expected:     Diagnostic response within 1000 ms
+  Actual:       Diagnostic response arrived after 1450 ms
+
+  Assertion:    assert diag_response_time <= 1000
+                AssertionError: 1450 > 1000
+
+  Timeline:
+    T+0 ms      diagnostic_request sent to MCM
+    T+50 ms     MCM acknowledges diagnostic_request
+    T+1450 ms   diagnostic_response received          ← LATE (threshold: 1000 ms)
+
+  Fixture state at failure:
+    virtual_topology:  running
+    reader:            available
+    lock_unit:         locked
+    door_sensor:       available
+    gateway:           available
+
+  Notes:        The diagnostic response was received, but it exceeded the
+                allowed threshold by 450 ms. The MCM appears to be processing
+                diagnostic requests more slowly after the timeout refactor.
+                
+                Historical response times from the last 5 passing runs:
+                  Run #1242:  620 ms
+                  Run #1243:  580 ms
+                  Run #1244:  710 ms
+                  Run #1245:  650 ms
+                  Run #1246:  690 ms
+                
+                The jump from ~650 ms average to 1450 ms is significant and
+                suggests a behavioral change, not normal variance.
+
+  Stderr:
+    [INFO]  MCM: diagnostic_request received
+    [DEBUG] MCM: processing diagnostic request...
+    [DEBUG] MCM: timeout_handler busy — queuing diagnostic processing
+    [WARN]  MCM: diagnostic_response delayed — processing took 1450 ms
+    [INFO]  MCM: diagnostic_response sent
+
+--- FAIL: TC-UNLOCK-008 — mocked node restart during unlock -------------------
+
+  Scenario:     Credential Reader restarts during an active unlock sequence.
+  Requirement:  REQ-009 (MCM should abort and reject unlock safely)
+
+  Expected:     MCM detects restart, aborts unlock, does NOT send unlock command
+  Actual:       Unlock command was sent to Lock Unit after Reader reconnected
+
+  Assertion:    assert not lock_unit.received_unlock_command()
+                AssertionError: unlock command was received
+
+  Timeline:
+    T+0 ms      credential_event_valid sent by Credential Reader
+    T+45 ms     unlock_request_received_by_mcm
+    T+120 ms    reader_disconnected                    ← Reader restarts
+    T+125 ms    MCM: reader_disconnect event received
+    T+340 ms    reader_reconnected                     ← Reader back online
+    T+345 ms    MCM: reader_reconnect event received
+    T+410 ms    unlock_command_sent_to_lock_unit        ← UNEXPECTED — should have been aborted
+    T+580 ms    lock_ack_delayed
+    T+920 ms    door_opened_event_delayed
+    T+1480 ms   diagnostic_response_delayed
+
+  Fixture state at failure:
+    virtual_topology:  running
+    reader:            available (restarted), last_credential=None
+    lock_unit:         unlocked, acknowledged=True, received_unlock=True  ← UNEXPECTED
+    door_sensor:       available, door_opened=True
+    gateway:           available
+
+  Notes:        The MCM received the reader_disconnect event at T+125 ms but
+                did not abort the in-progress unlock sequence.
+                After the reader reconnected at T+340 ms, the MCM resumed
+                the unlock flow and sent the unlock command at T+410 ms.
+                
+                This behavior is incorrect: after a node restart, the original
+                credential data should be considered stale. The MCM should have
+                aborted the sequence and required a new credential event.
+                
+                This is a potential SAFETY CONCERN — the system proceeded with
+                an unlock based on credential data from before the node restart.
+                The reader's own state shows last_credential=None after restart,
+                confirming the stale data issue.
+
+  Stderr:
+    [INFO]  MCM: credential_event_valid received — starting unlock sequence
+    [INFO]  MCM: unlock_request processing
+    [WARN]  MCM: reader_disconnected event received
+    [DEBUG] MCM: timeout_handler — checking active sequence state
+    [INFO]  MCM: reader_reconnected event received
+    [INFO]  MCM: resuming unlock sequence          ← PROBLEM: should abort
+    [INFO]  MCM: unlock_command sent to Lock Unit
+    [INFO]  MCM: lock_acknowledgement received
+    [INFO]  MCM: door_opened event received
+    [DEBUG] MCM: unlock sequence completed
+
+================================================================================
+OBSERVED MESSAGE SEQUENCE (from TC-UNLOCK-008 — full trace)
+================================================================================
+
+  Seq#  Timestamp       Source              Event
+  ────  ─────────────   ──────────────────  ──────────────────────────────────────
+  1     T+0 ms          Credential Reader   credential_event_valid
+  2     T+45 ms         MCM                 unlock_request_received_by_mcm
+  3     T+120 ms        Credential Reader   reader_disconnected
+  4     T+125 ms        MCM                 reader_disconnect_event_received
+  5     T+340 ms        Credential Reader   reader_reconnected
+  6     T+345 ms        MCM                 reader_reconnect_event_received
+  7     T+410 ms        MCM → Lock Unit     unlock_command_sent_to_lock_unit    ←
+  8     T+580 ms        Lock Unit → MCM     lock_ack_delayed
+  9     T+920 ms        Door Sensor → MCM   door_opened_event_delayed
+  10    T+1480 ms       MCM                 diagnostic_response_delayed
+
+  Analysis notes:
+  - Event #7 should NOT have occurred after a reader restart (events #3-#6).
+  - The MCM should have aborted the sequence at event #4.
+  - Events #8-#10 are consequences of the incorrect unlock command.
+
+================================================================================
+CROSS-FAILURE PATTERN ANALYSIS
+================================================================================
+
+  Common thread:  All 4 failures are related to timing behavior and/or
+                  error handling in the unlock flow. The recent commit (a3f8c21)
+                  refactored the timeout handling module, which is the most
+                  likely trigger.
+
+  Timing failures (TC-003, TC-006):
+    Both tests show response times significantly exceeding their thresholds.
+    Historical data shows these were consistently passing before the refactor.
+    Possible cause: timer lifecycle changes in timeout_handler.py.
+
+  Missing diagnostic (TC-004):
+    The diagnostic event emission path appears to be broken.
+    The MCM detects the timeout (debug logs show threshold reached) but does
+    not emit the diagnostic event.
+    Possible cause: diagnostic emission removed or bypassed in diagnostics.py
+    refactor.
+
+  Stale state / safety (TC-008):
+    The MCM resumes a stale unlock sequence after a node restart.
+    Possible cause: the refactored timeout_handler or unlock_flow does not
+    properly invalidate in-progress sequences on node disconnect.
+
+================================================================================
+FLAKY TEST CHECK
+================================================================================
+
+  TC-UNLOCK-003:  Failed 0 of last 10 runs before this commit. NOT FLAKY.
+  TC-UNLOCK-004:  Failed 0 of last 10 runs before this commit. NOT FLAKY.
+  TC-UNLOCK-006:  Failed 0 of last 10 runs before this commit. NOT FLAKY.
+  TC-UNLOCK-008:  Failed 0 of last 10 runs before this commit. NOT FLAKY.
+
+  All 4 failures are new as of commit a3f8c21.
+
+================================================================================
+COVERAGE DELTA (vs. previous passing run #1246)
+================================================================================
+
+  File                          Previous    Current     Delta
+  ─────────────────────────     ────────    ───────     ─────
+  src/mcm/timeout_handler.py    92%         78%         -14%
+  src/mcm/unlock_flow.py        88%         85%         -3%
+  src/mcm/diagnostics.py        95%         81%         -14%
+  tests/conftest.py             100%        100%        —
+  Overall                       91%         84%         -7%
+
+  Note: Coverage dropped most significantly in timeout_handler.py and
+  diagnostics.py — the two files most heavily modified in the refactor.
+  This suggests new code paths that are not yet covered by existing tests,
+  or old code paths that were removed/changed and are no longer exercised.
+
+================================================================================
+ENVIRONMENT
+================================================================================
+
+  Python:         3.11.5
+  pytest:         8.1.1
+  coverage:       7.4.0
+  OS:             Ubuntu 22.04 (CI runner: ci-runner-04.internal)
+  Topology:       virtual (all nodes mocked)
+  Hardware:       none (pure software simulation)
+  CI platform:    GitHub Actions
+  Artifact:       test-results-1247.xml (attached)
+
+================================================================================
+PREVIOUS PASSING RUN (for comparison)
+================================================================================
+
+  Run ID:         #1246
+  Branch:         main
+  Commit:         b7e4f10 "fix: update door sensor mock timing"
+  Total tests:    18
+  Passed:         18
+  Failed:         0
+  Duration:       11.8s
+
+  All 18 tests passed in run #1246 on the main branch.
+  The 4 failures in run #1247 are all new.
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -1,0 +1,9 @@
+[project]
+name = "virtual-entry-access-ai-lab"
+requires-python = ">=3.8"
+
+[tool.pytest.ini_options]
+markers = [
+    "skip: mark a test as skipped (missing infrastructure)",
+    "xfail: mark a test as expected to fail (behavior not yet implemented)",
+]

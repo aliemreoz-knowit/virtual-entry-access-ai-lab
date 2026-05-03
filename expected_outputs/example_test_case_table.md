@@ -1,0 +1,18 @@
+# Example: Test Case Table
+
+> **Facilitator reference only.** Do not share with participants before the exercise.
+> This is an example of what a good AI-generated output might look like.
+> Participant outputs will vary.
+
+---
+
+| Test Case ID | Scenario | Category | Preconditions | Stimulus | Mocked Node Behavior | Expected Result | Key Assertions | Timing / Comm. Assumptions | Automation Notes | Local or CI | Risk / Priority |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| TC-INT-001 | Valid credential nominal unlock | functional | System running, locked | Valid credential presented via Reader | Reader sends valid credential; Lock Unit acknowledges within 300 ms; Door Sensor reports opened within 500 ms | Full unlock sequence completes, no diagnostics raised | `lock_unit.received_unlock_command()`, `door_sensor.reported_door_opened()`, no diagnostic events | Full sequence < 2000 ms [ASSUMPTION] | Baseline test — should always pass | Local + CI | High |
+| TC-INT-002 | Invalid credential rejection | functional | System running, locked | Invalid credential presented via Reader | Reader sends invalid credential | Unlock command NOT sent, diagnostic/audit event raised | `not lock_unit.received_unlock_command()`, diagnostic event present | N/A | Check both command absence and diagnostic presence | Local + CI | High |
+| TC-INT-003 | Delayed door sensor response | timing | System running, locked, valid credential accepted | Valid credential → unlock command → lock ack received | Door Sensor delays response beyond 500 ms | MCM raises DOOR_SENSOR_TIMEOUT diagnostic, system stays locked | `"DOOR_SENSOR_TIMEOUT" in diagnostics`, door remains in safe state | Door sensor timeout threshold: 500 ms [ASSUMPTION] | Requires timing control in mock | CI | High |
+| TC-INT-004 | Lock unit timeout — no ack | timing | System running, locked | Valid credential presented | Lock Unit does not acknowledge within 300 ms | MCM raises LOCK_UNIT_TIMEOUT diagnostic, unlock aborted | `"LOCK_UNIT_TIMEOUT" in diagnostics`, `not door_sensor.reported_door_opened()` | Lock ack timeout: 300 ms [ASSUMPTION] | Mock must suppress ack | CI | High |
+| TC-INT-005 | Gateway unavailable during unlock | communication | System running, gateway set unavailable | Valid credential presented | Gateway is down, messages cannot route | MCM detects failure, raises GATEWAY_UNAVAILABLE, system stays locked | `"GATEWAY_UNAVAILABLE" in diagnostics`, `lock_unit.is_locked` | Gateway failure detected before unlock command [ASSUMPTION] | Use `gateway.set_unavailable()` | Local + CI | Medium |
+| TC-INT-006 | Diagnostic response delay | diagnostic | System running | Diagnostic request sent to MCM | MCM delays response beyond 1000 ms | Response received but flagged as timing violation | `diag_response_time > 1000`, violation logged | Diagnostic threshold: 1000 ms [ASSUMPTION] | Needs timer instrumentation | CI | Medium |
+| TC-INT-007 | Repeated unlock request | functional | Unlock sequence already in progress | Second credential event arrives | Reader sends second credential while first is processing | Second request rejected, no duplicate unlock command | Single `unlock_command` sent, second request logged | Sequence-in-progress flag in MCM [ASSUMPTION] | State management test | Local + CI | Medium |
+| TC-INT-008 | Node restart during unlock | recovery | Unlock sequence in progress | Reader restarts mid-sequence | Reader disconnects and reconnects | MCM aborts unlock, does NOT use stale data, diagnostic raised | `not lock_unit.received_unlock_command()` after restart, diagnostic event present | MCM detects disconnect within sequence timeout [ASSUMPTION] | Requires `reader.restart()` during active flow | CI | High |
