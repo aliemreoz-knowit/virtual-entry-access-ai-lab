@@ -304,19 +304,6 @@ The repository includes 9 requirements covering the unlock flow:
 
 ---
 
-## Facilitator Notes
-
-- The `expected_outputs/` folder contains example outputs for reference.
-  **Do not share these with participants before the exercise.**
-- Participant outputs will vary — the examples show what a good result
-  looks like, not the only correct answer.
-- Encourage participants to **review AI output critically** and identify
-  assumptions, gaps and potential errors.
-- The workshop message is clear: AI is a tool that accelerates work, but
-  engineers own the final decisions.
-
----
-
 ## Contributing
 
 This is a workshop demonstration project. Feel free to:
